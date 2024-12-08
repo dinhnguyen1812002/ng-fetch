@@ -265,7 +265,7 @@ func PrintSystemInfo(noColor bool) {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Icon", "Language", "Version"})
 	table.SetBorder(false)
-	table.SetAlignment(tablewriter.ALIGN_CENTER)
+	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.SetHeaderColor(
 		tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
 		tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
