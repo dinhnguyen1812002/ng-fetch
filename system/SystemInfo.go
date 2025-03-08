@@ -3,283 +3,201 @@ package system
 import (
 	"fmt"
 	"github.com/fatih/color"
-	"github.com/olekukonko/tablewriter"
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/host"
 	"github.com/shirou/gopsutil/mem"
 	"github.com/shirou/gopsutil/net"
-	"os"
-	"os/exec"
-	"runtime"
 	"strings"
+	"unicode/utf8"
 )
 
-// Language represents a programming language with its details
-type Language struct {
-	Icon    string
-	Name    string
-	Version string
+// SystemInfo holds all system information
+type SystemInfo struct {
+	Platform    string
+	Kernel      string
+	Hostname    string
+	CPU         string
+	Memory      float64
+	Disk        float64
+	Uptime      float64
+	NetworkSent float64
+	NetworkRecv float64
 }
 
-// GetProgrammingLanguages returns a detailed list of installed languages
-func GetProgrammingLanguages() []Language {
-	// Cross-platform language detection
-	languages := []Language{
-		languageDetector("Python", "🐍", getPythonVersion()),
-		languageDetector("Go", "🟢", getGoVersion()),
-		languageDetector("Node.js", "🟨", getNodeVersion()),
-		languageDetector("Java", "☕", getJavaVersion()),
-		languageDetector("Ruby", "💎", getRubyVersion()),
-		languageDetector("Rust", "🦀", getRustVersion()),
-		languageDetector("PHP", "🐘", getPHPVersion()),
-	}
-
-	// Filter out languages with empty versions
-	var installedLanguages []Language
-	for _, lang := range languages {
-		if lang.Version != "" {
-			installedLanguages = append(installedLanguages, lang)
-		}
-	}
-
-	return installedLanguages
-}
-
-// Helper function to create a language entry
-func languageDetector(name, icon, version string) Language {
-	return Language{
-		Name:    name,
-		Icon:    icon,
-		Version: version,
-	}
-}
-
-// Platform-specific version detection functions
-func getPythonVersion() string {
-	return runCommand("python", "--version")
-}
-
-func getGoVersion() string {
-	return runCommand("go", "version")
-}
-
-func getNodeVersion() string {
-	return runCommand("node", "--version")
-}
-
-func getJavaVersion() string {
-	return runCommand("java", "-version")
-}
-
-func getRubyVersion() string {
-	return runCommand("ruby", "--version")
-}
-
-func getRustVersion() string {
-	return runCommand("rustc", "--version")
-}
-
-func getPHPVersion() string {
-	return runCommand("php", "--version")
-}
-
-// Cross-platform command runner
-func runCommand(command string, args ...string) string {
-	// Construct the full command with args
-	fullCmd := append([]string{command}, args...)
-
-	// Different approaches for Windows and Unix-like systems
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		// On Windows, use cmd.exe to run commands
-		winArgs := append([]string{"/c"}, fullCmd...)
-		cmd = exec.Command("cmd", winArgs...)
-	} else {
-		// On Unix-like systems, use sh
-		cmd = exec.Command(command, args...)
-	}
-
-	// Run the command and capture output
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return ""
-	}
-
-	// Clean and process the version string
-	version := strings.TrimSpace(string(output))
-
-	// Remove command name or additional text
-	version = processVersionString(command, version)
-
-	return version
-}
-
-// Process version string to extract clean version
-func processVersionString(command, version string) string {
-	// Different processing for different commands
-	switch command {
-	case "python", "ruby", "go", "rustc":
-
-		parts := strings.Fields(version)
-		if len(parts) > 1 {
-			return parts[1]
-		}
-	case "node":
-		// Node.js version starts with 'v'
-		return strings.TrimPrefix(version, "v")
-	case "java":
-		// Java version is more complex
-		lines := strings.Split(version, "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "version") {
-				// Extract version in quotes
-				parts := strings.Split(line, "\"")
-				if len(parts) > 1 {
-					return parts[1]
-				}
-			}
-		}
-	case "php":
-		parts := strings.Fields(version)
-		if len(parts) > 0 {
-			return parts[0]
-		}
-	}
-
-	return version
-}
-
-// PrintSystemInfo displays system information in a single row with a language table
-// PrintSystemInfo displays system information in a well-structured format
 // PrintSystemInfo displays system information in an enhanced format
-func PrintSystemInfo(noColor bool) {
+func PrintSystemInfo(noColor bool) error {
 	// If noColor is true, disable color output
-	if noColor {
-		color.NoColor = true
-	}
+	color.NoColor = noColor
 
 	// Collect system information
-	hostInfo, _ := host.Info()
-	cpuInfo, _ := cpu.Info()
-	cpuCount, _ := cpu.Counts(true)
-	memInfo, _ := mem.VirtualMemory()
-	diskInfo, _ := disk.Usage("/")
-	netInfo, _ := net.IOCounters(false)
+	info, err := collectSystemInfo()
+	if err != nil {
+		return fmt.Errorf("failed to collect system information: %v", err)
+	}
 
-	// Define color functions
-	titleColor := color.New(color.FgHiMagenta, color.Bold).SprintFunc()
-	headerColor := color.New(color.FgHiCyan, color.Bold).SprintFunc()
-	//valueColor := color.New(color.FgWhite).SprintFunc()
-	//infoColor := color.New(color.FgHiGreen).SprintFunc()
+	// Create color schemes
+	schemes := createColorSchemes()
 
-	// Print decorative border
-	borderLine := strings.Repeat("═", 50)
-	fmt.Println(titleColor("╔" + borderLine + "╗"))
-	fmt.Printf("%s %s %s\n",
-		titleColor("║"),
-		titleColor("🌟 SYSTEM INFORMATION DASHBOARD 🌟"),
-		titleColor("║"),
-	)
-	fmt.Println(titleColor("╠" + borderLine + "╣"))
+	// Print dashboard
+	//printDashboardHeader(schemes.header)
+	printSystemDetails(info, schemes)
+	//printLanguageSection(schemes)
 
-	// System Information Display
-	systemInfoItems := []struct {
-		icon   string
-		header string
-		value  string
-		color  func(a ...interface{}) string
+	return nil
+}
+
+func collectSystemInfo() (*SystemInfo, error) {
+	hostInfo, err := host.Info()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host info: %v", err)
+	}
+
+	cpuInfo, err := cpu.Info()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CPU info: %v", err)
+	}
+
+	cpuCount, err := cpu.Counts(true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CPU count: %v", err)
+	}
+
+	memInfo, err := mem.VirtualMemory()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get memory info: %v", err)
+	}
+
+	diskInfo, err := disk.Usage("/")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get disk info: %v", err)
+	}
+
+	netInfo, err := net.IOCounters(false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get network info: %v", err)
+	}
+
+	return &SystemInfo{
+		Platform:    fmt.Sprintf("%s %s", hostInfo.Platform, hostInfo.PlatformVersion),
+		Kernel:      hostInfo.KernelVersion,
+		Hostname:    hostInfo.Hostname,
+		CPU:         fmt.Sprintf("%s (%d cores)", cpuInfo[0].ModelName, cpuCount),
+		Memory:      float64(memInfo.Total) / (1 << 30),
+		Disk:        float64(diskInfo.Total) / (1 << 30),
+		Uptime:      float64(hostInfo.Uptime) / 3600,
+		NetworkSent: float64(netInfo[0].BytesSent) / (1 << 20),
+		NetworkRecv: float64(netInfo[0].BytesRecv) / (1 << 20),
+	}, nil
+}
+
+type colorSchemes struct {
+	header  *color.Color
+	section *color.Color
+	value   *color.Color
+	border  *color.Color
+}
+
+func createColorSchemes() colorSchemes {
+	return colorSchemes{
+		header:  color.New(color.FgHiGreen, color.Bold),
+		section: color.New(color.FgHiBlue, color.Bold),
+		value:   color.New(color.FgWhite),
+		border:  color.New(color.FgHiBlack, color.Bold),
+	}
+}
+
+//
+//func printDashboardHeader(headerColor *color.Color) {
+//	timestamp := time.Now().Format("2006-01-02 15:04:05")
+//	borderLine := strings.Repeat("═", 60)
+//
+//	fmt.Printf("╔%s╗\n", borderLine)
+//	fmt.Printf("║ %s ║\n", centerText("SYSTEM INFORMATION DASHBOARD", 58))
+//	fmt.Printf("║ %s ║\n", centerText(timestamp, 58))
+//	fmt.Printf("╠%s╣\n", borderLine)
+//}
+
+func getDisplayWidth(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+func getPadding(content string, totalWidth int) string {
+	displayWidth := getDisplayWidth(content)
+	paddingWidth := totalWidth - displayWidth
+	if paddingWidth < 0 {
+		paddingWidth = 0
+	}
+	return strings.Repeat(" ", paddingWidth)
+}
+
+func printSystemDetails(info *SystemInfo, schemes colorSchemes) {
+	const totalWidth = 58 // Total width of the display area
+
+	metrics := []struct {
+		icon  string
+		name  string
+		value interface{}
+		unit  string
 	}{
-		{
-			icon:   "🖥️ ",
-			header: "Platform",
-			value:  fmt.Sprintf("%s %s", hostInfo.Platform, hostInfo.PlatformVersion),
-			color:  color.New(color.FgHiRed).SprintFunc(),
-		},
-		{
-			icon:   "🧊 ",
-			header: "Kernel",
-			value:  hostInfo.KernelVersion,
-			color:  color.New(color.FgHiBlue).SprintFunc(),
-		},
-		{
-			icon:   "🏠 ",
-			header: "Hostname",
-			value:  hostInfo.Hostname,
-			color:  color.New(color.FgHiYellow).SprintFunc(),
-		},
-		{
-			icon:   "🧠 ",
-			header: "CPU",
-			value:  fmt.Sprintf("\t%s (%d cores)", cpuInfo[0].ModelName, cpuCount),
-			color:  color.New(color.FgHiGreen).SprintFunc(),
-		},
-		{
-			icon:   "💾 ",
-			header: "Memory",
-			value:  fmt.Sprintf("\t%.2f GB", float64(memInfo.Total)/(1<<30)),
-			color:  color.New(color.FgHiMagenta).SprintFunc(),
-		},
-		{
-			icon:   "📂 ",
-			header: "Disk",
-			value:  fmt.Sprintf("\t%.2f GB", float64(diskInfo.Total)/(1<<30)),
-			color:  color.New(color.FgHiCyan).SprintFunc(),
-		},
-		{
-			icon:   "⏳ ",
-			header: "Uptime",
-			value:  fmt.Sprintf("\t%.2f hrs", float64(hostInfo.Uptime)/3600),
-			color:  color.New(color.FgHiWhite).SprintFunc(),
-		},
-		{
-			icon:   "🌐 ",
-			header: "Network",
-			value: fmt.Sprintf("\t%.2f MB sent | %.2f MB received",
-				float64(netInfo[0].BytesSent)/(1<<20),
-				float64(netInfo[0].BytesRecv)/(1<<20)),
-			color: color.New(color.FgHiYellow).SprintFunc(),
-		},
+		{"\uF17C", "Platform", info.Platform, ""},
+		{"\uE70F", "Kernel", info.Kernel, ""},
+		{"\uE795", "Hostname", info.Hostname, ""},
+		{"\uF4BC", "CPU", info.CPU, ""},
+		{"\uF85A", "Memory", info.Memory, "GB"},
+		{"\uF0A0", "Disk", info.Disk, "GB"},
+		{"\uF43A", "Uptime", info.Uptime, "hours"},
+		{"\uF6FF", "Network", fmt.Sprintf("↑%.2f MB | ↓%.2f MB", info.NetworkSent, info.NetworkRecv), ""},
 	}
 
-	// Print system information with enhanced formatting
-	for _, item := range systemInfoItems {
-		fmt.Printf("%s %s: %s\n",
-			headerColor(item.icon+item.header),
-			headerColor(":"),
-			item.color(item.value),
-		)
+	for _, metric := range metrics {
+		var valueStr string
+		if v, ok := metric.value.(float64); ok {
+			valueStr = fmt.Sprintf("%.2f %s", v, metric.unit)
+		} else {
+			valueStr = fmt.Sprintf("%v", metric.value)
+		}
+
+		line := fmt.Sprintf("%s %s: %s",
+			metric.icon,
+			schemes.header.Sprint(metric.name),
+			schemes.value.Sprint(valueStr))
+
+		padding := getPadding(line, totalWidth)
+		fmt.Printf(" %s%s \n", line, padding)
+	}
+}
+
+//
+//func printLanguageSection(schemes colorSchemes) {
+//	borderLine := strings.Repeat("═", 60)
+//	fmt.Printf("╠%s╣\n", borderLine)
+//	fmt.Printf("║ %s ║\n", centerText("INSTALLED PROGRAMMING LANGUAGES", 58))
+//	fmt.Printf("╠%s╣\n", borderLine)
+//
+//	languages := GetProgrammingLanguages()
+//	for _, lang := range languages {
+//		line := fmt.Sprintf("%s %s: %s",
+//			lang.Icon,
+//			schemes.section.Sprint(lang.Name),
+//			schemes.value.Sprint(lang.Version))
+//
+//		padding := getPadding(line, 56) // 58 - 2 for the border spaces
+//		fmt.Printf("║ %s%s ║\n", line, padding)
+//	}
+//
+//	fmt.Printf("╚%s╝\n", borderLine)
+//}
+
+func centerText(text string, width int) string {
+	displayWidth := getDisplayWidth(text)
+	if displayWidth >= width {
+		return text
 	}
 
-	// Close information section
-	fmt.Println(titleColor("╠" + borderLine + "╣"))
+	padding := width - displayWidth
+	leftPad := padding / 2
+	rightPad := padding - leftPad
 
-	// Get installed languages
-	languages := GetProgrammingLanguages()
-
-	// Create table for languages with improved styling
-	fmt.Println(titleColor("║ 🚀 INSTALLED PROGRAMMING LANGUAGES ") + titleColor("║"))
-	fmt.Println(titleColor("╠" + borderLine + "╣"))
-
-	// Create table for languages
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Icon", "Language", "Version"})
-	table.SetBorder(false)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
-	table.SetHeaderColor(
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
-		tablewriter.Colors{tablewriter.Bold, tablewriter.FgCyanColor},
-	)
-
-	// Populate table with language information
-	for _, lang := range languages {
-		table.Append([]string{lang.Icon, lang.Name, lang.Version})
-	}
-
-	// Render the table
-	table.Render()
-
-	// Close the dashboard
-	fmt.Println(titleColor("╚" + borderLine + "╝"))
+	return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
 }

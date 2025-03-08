@@ -43,5 +43,8 @@ func runNeofetch() {
 	}
 
 	// Print the system info along with ASCII art
-	system.PrintSystemInfo(false)
+	err := system.PrintSystemInfo(noColors)
+	if err != nil {
+		return
+	}
 }
